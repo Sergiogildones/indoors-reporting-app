@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Indoors App</title>
+
+<link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+<script src="https://js.arcgis.com/4.29/"></script>
+
+<style>
+html, body, #viewDiv {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+#ui {
+  position: absolute;
+  top: 30px;
+  left: 30px;
+  background: #256e80;
+  color: #ffffff;
+  padding: 15px;
+  z-index: 10;
+  font-family: Arial;
+  width: 320px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+label {
+  display: block;
+  margin-bottom: 20px;
+}
+
+select, textarea, input {
+  width: 100%;
+  margin-bottom: 25px;
+}
+</style>
+</head>
+
+<body>
+<div id="viewDiv"></div>
+
+<div id="ui">
+
+  <label><b>Building</b></label>
+  <select id="buildingSelect"></select>
+
+  <label><b>Floor</b></label>
+  <select id="floorSelect"></select>
+
+  <hr>
+
+  <div><b>Room:</b> <span id="room">-</span></div>
+  <div><b>Building:</b> <span id="building">-</span></div>
+  <div><b>Floor:</b> <span id="floor">-</span></div>
+
+  <hr>
+
+  <label><b>Category</b> (optional)</label>
+  <select id="category">
+    <option value="">Select category</option>
+    <option value="Electrical Systems">Electrical Systems</option>
+    <option value="Heating, Ventilation, and Air Conditioning Systems">HVAC Systems</option>
+    <option value="Plumbing & Water Systems">Plumbing & Water Systems</option>
+    <option value="Building Fabric">Building Fabric</option>
+    <option value="Fire Safety Systems">Fire Safety Systems</option>
+    <option value="Vertical Transportation">Vertical Transportation</option>
+  </select>
+
+  <label><b>Describe issue *</b></label>
+  <textarea id="issue" placeholder="Describe the issue..." rows="3"></textarea>
+
+  <label><b>Attach photo</b> (optional)</b></label>
+  <input type="file" id="photo" accept="image/*">
+
+  <button onclick="submitIssue()" style="width:100%; padding:8px;">Submit</button>
+
+</div>
+
+<script>
+require([
+  "esri/Map",
+  "esri/views/MapView",
+  "esri/layers/FeatureLayer",
+  "esri/Graphic"
+], function(Map, MapView, FeatureLayer, Graphic) {
+
+const baseUrl = "https://services.arcgis.com/KG07fAgFz0vFjJc4/arcgis/rest/services/Indoors_8_WFL1/FeatureServer";
+
+const facilitiesLayer = new FeatureLayer({ url: baseUrl + "/13", outFields: ["*"] });
+const levelsLayer = new FeatureLayer({ url: baseUrl + "/12", outFields: ["*"], minScale: 5000, opacity: 0.4 });
+const unitsLayer = new FeatureLayer({ url: baseUrl + "/11", outFields: ["*"], minScale: 5000 });
+const detailsLayer = new FeatureLayer({ url: baseUrl + "/14", outFields: ["*"], minScale: 5000, visible: false });
+
+const map = new Map({
+  basemap: "topo-vector",
+  layers: [facilitiesLayer, levelsLayer, unitsLayer, detailsLayer]
+});
+
+const view = new MapView({
+  container: "viewDiv",
+  map: map,
+  extent: {
+    xmin: -1.30,
+    ymin: 51.73,
+    xmax: -1.22,
+    ymax: 51.77,
+    spatialReference: { wkid: 4326 }
+  }
+});
+
+const buildingSelect = document.getElementById("buildingSelect");
+const floorSelect = document.getElementById("floorSelect");
+
+let currentFacilityId = null;
+
+// LOAD BUILDINGS
+view.when(() => {
+  facilitiesLayer.queryFeatures({
+    where: "1=1",
+    outFields: ["FACILITY_ID", "NAME"],
+    returnDistinctValues: true
+  }).then(res => {
+
+    buildingSelect.innerHTML = "<option value=''>Select building</option>";
+
+    res.features.forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = f.attributes.FACILITY_ID;
+      opt.text = f.attributes.NAME;
+      buildingSelect.appendChild(opt);
+    });
+
+  });
+});
+
+// BUILDING SELECT
+buildingSelect.addEventListener("change", function() {
+
+  currentFacilityId = this.value;
+  if (!currentFacilityId) return;
+
+  facilitiesLayer.definitionExpression = `FACILITY_ID = '${currentFacilityId}'`;
+  levelsLayer.definitionExpression = "1=0";
+  unitsLayer.definitionExpression = "1=0";
+  detailsLayer.visible = false;
+
+  facilitiesLayer.queryFeatures({
+    where: `FACILITY_ID = '${currentFacilityId}'`,
+    returnGeometry: true
+  }).then(res => {
+
+    if (res.features.length) {
+      let fullExtent = res.features[0].geometry.extent;
+
+      res.features.forEach(f => {
+        fullExtent = fullExtent.union(f.geometry.extent);
+      });
+
+      view.goTo(fullExtent.expand(1.2));
+    }
+
+  });
+
+  unitsLayer.queryFeatures({
+    where: `FACILITY_ID = '${currentFacilityId}'`,
+    outFields: ["LEVEL_ID", "Floor"]
+  }).then(res => {
+
+    const floors = {};
+
+    res.features.forEach(f => {
+      floors[f.attributes.LEVEL_ID] = f.attributes.Floor;
+    });
+
+    floorSelect.innerHTML = "<option value=''>Select floor</option>";
+
+    Object.keys(floors).forEach(id => {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.text = floors[id];
+      floorSelect.appendChild(opt);
+    });
+
+  });
+
+});
+
+// FLOOR SELECT
+floorSelect.addEventListener("change", function() {
+
+  const floor = this.value;
+  if (!floor) return;
+
+  const filter =
+    `FACILITY_ID = '${currentFacilityId}' AND LEVEL_ID = '${floor}'`;
+
+  levelsLayer.definitionExpression = filter;
+  unitsLayer.definitionExpression = filter;
+
+  detailsLayer.definitionExpression =
+    `Building_Number = ${currentFacilityId} AND LEVEL_ID = '${floor}'`;
+
+  detailsLayer.visible = true;
+
+  unitsLayer.queryFeatures({
+    where: filter,
+    returnGeometry: true
+  }).then(res => {
+
+    if (res.features.length) {
+      let fullExtent = res.features[0].geometry.extent;
+
+      res.features.forEach(f => {
+        fullExtent = fullExtent.union(f.geometry.extent);
+      });
+
+      view.goTo(fullExtent.expand(1.2));
+    }
+
+  });
+
+});
+
+// CLICK (FILTERED)
+view.on("click", function(event) {
+
+  if (!currentFacilityId || !floorSelect.value) return;
+
+  const floor = floorSelect.value;
+
+  const where =
+    `FACILITY_ID = '${currentFacilityId}' AND LEVEL_ID = '${floor}'`;
+
+  unitsLayer.queryFeatures({
+    geometry: event.mapPoint,
+    spatialRelationship: "intersects",
+    where: where,
+    returnGeometry: true,
+    outFields: ["*"]
+  }).then(res => {
+
+    view.graphics.removeAll();
+
+    if (res.features.length > 0) {
+      const f = res.features[0];
+
+      document.getElementById("room").innerText = f.attributes.NAME || "-";
+      document.getElementById("building").innerText = f.attributes.Building_Name || "-";
+      document.getElementById("floor").innerText = f.attributes.Floor || "-";
+
+      view.graphics.add(new Graphic({
+        geometry: f.geometry,
+        symbol: {
+          type: "simple-fill",
+          color: [255, 255, 0, 0.3],
+          outline: { color: [255, 200, 0], width: 2 }
+        }
+      }));
+    }
+
+  });
+
+});
+
+});
+
+// SUBMIT FUNCTION (TEXT REQUIRED)
+function submitIssue() {
+
+  const issue = document.getElementById("issue").value.trim();
+  const category = document.getElementById("category").value;
+  const file = document.getElementById("photo").files[0];
+
+  if (!issue) {
+    alert("Please describe the issue (required)");
+    return;
+  }
+
+  const formData = new FormData();
+
+  formData.append("issue", issue);
+  formData.append("category", category);
+  formData.append("building", document.getElementById("building").innerText);
+  formData.append("floor", document.getElementById("floor").innerText);
+  formData.append("room", document.getElementById("room").innerText);
+
+  if (file) {
+    formData.append("photo", file);
+  }
+
+  console.log("Submitting:", Object.fromEntries(formData));
+
+  alert("Submitted (not connected yet)");
+
+}
+</script>
+</body>
+</html>
