@@ -34,7 +34,7 @@ label {
   margin-bottom: 20px;
 }
 
-select, textarea, input {
+select {
   width: 100%;
   margin-bottom: 25px;
 }
@@ -60,24 +60,9 @@ select, textarea, input {
 
   <hr>
 
-  <label><b>Category</b> (optional)</label>
-  <select id="category">
-    <option value="">Select category</option>
-    <option value="Electrical Systems">Electrical Systems</option>
-    <option value="Heating, Ventilation, and Air Conditioning Systems">HVAC Systems</option>
-    <option value="Plumbing & Water Systems">Plumbing & Water Systems</option>
-    <option value="Building Fabric">Building Fabric</option>
-    <option value="Fire Safety Systems">Fire Safety Systems</option>
-    <option value="Vertical Transportation">Vertical Transportation</option>
-  </select>
-
-  <label><b>Describe issue *</b></label>
-  <textarea id="issue" placeholder="Describe the issue..." rows="3"></textarea>
-
-  <label><b>Attach photo</b> (optional)</label>
-  <input type="file" id="photo" accept="image/*">
-
-  <button onclick="submitIssue()" style="width:100%; padding:8px;">Submit</button>
+  <button onclick="openSurvey()" style="width:100%; padding:10px;">
+    Report issue in this space
+  </button>
 
 </div>
 
@@ -91,10 +76,30 @@ require([
 
 const baseUrl = "https://services.arcgis.com/KG07fAgFz0vFjJc4/arcgis/rest/services/Indoors_8_WFL1/FeatureServer";
 
-const facilitiesLayer = new FeatureLayer({ url: baseUrl + "/13", outFields: ["*"] });
-const levelsLayer = new FeatureLayer({ url: baseUrl + "/12", outFields: ["*"], minScale: 5000, opacity: 0.4 });
-const unitsLayer = new FeatureLayer({ url: baseUrl + "/11", outFields: ["*"], minScale: 5000 });
-const detailsLayer = new FeatureLayer({ url: baseUrl + "/14", outFields: ["*"], minScale: 5000, visible: false });
+const facilitiesLayer = new FeatureLayer({
+  url: baseUrl + "/13",
+  outFields: ["FACILITY_ID", "NAME"]
+});
+
+const levelsLayer = new FeatureLayer({
+  url: baseUrl + "/12",
+  outFields: ["LEVEL_ID", "FACILITY_ID"],
+  minScale: 5000,
+  opacity: 0.4
+});
+
+const unitsLayer = new FeatureLayer({
+  url: baseUrl + "/11",
+  outFields: ["Space_code", "Building_Name", "Floor", "LEVEL_ID", "FACILITY_ID"],
+  minScale: 5000
+});
+
+const detailsLayer = new FeatureLayer({
+  url: baseUrl + "/14",
+  outFields: ["LEVEL_ID", "Building_Number"],
+  minScale: 5000,
+  visible: false
+});
 
 const map = new Map({
   basemap: "topo-vector",
@@ -138,7 +143,7 @@ view.when(() => {
   });
 });
 
-// BUILDING SELECT (WITH ZOOM FIX)
+// BUILDING SELECT
 buildingSelect.addEventListener("change", function() {
 
   currentFacilityId = this.value;
@@ -149,11 +154,12 @@ buildingSelect.addEventListener("change", function() {
   unitsLayer.definitionExpression = "1=0";
   detailsLayer.visible = false;
 
-  // ✅ ZOOM TO BUILDING
+  // ZOOM
   facilitiesLayer.queryFeatures({
     where: `FACILITY_ID = '${currentFacilityId}'`,
     returnGeometry: true
   }).then(res => {
+
     if (res.features.length) {
       let fullExtent = res.features[0].geometry.extent;
 
@@ -163,6 +169,7 @@ buildingSelect.addEventListener("change", function() {
 
       view.goTo(fullExtent.expand(1.2));
     }
+
   });
 
   // LOAD FLOORS
@@ -209,7 +216,7 @@ floorSelect.addEventListener("change", function() {
 
 });
 
-// CLICK
+// CLICK (FIXED TO USE Space_code)
 view.on("click", function(event) {
 
   if (!currentFacilityId || !floorSelect.value) return;
@@ -221,7 +228,7 @@ view.on("click", function(event) {
     spatialRelationship: "intersects",
     where: `FACILITY_ID = '${currentFacilityId}' AND LEVEL_ID = '${floor}'`,
     returnGeometry: true,
-    outFields: ["*"]
+    outFields: ["Space_code", "Building_Name", "Floor"]
   }).then(res => {
 
     view.graphics.removeAll();
@@ -229,7 +236,7 @@ view.on("click", function(event) {
     if (res.features.length > 0) {
       const f = res.features[0];
 
-      document.getElementById("room").innerText = f.attributes.NAME || "-";
+      document.getElementById("room").innerText = f.attributes.Space_code || "-";
       document.getElementById("building").innerText = f.attributes.Building_Name || "-";
       document.getElementById("floor").innerText = f.attributes.Floor || "-";
 
@@ -249,52 +256,22 @@ view.on("click", function(event) {
 
 });
 
-// SUBMIT (WITH DEBUG LOGGING)
-async function submitIssue() {
+// SURVEY
+function openSurvey() {
 
-  const issue = document.getElementById("issue").value.trim();
-  const category = document.getElementById("category").value;
+  const building = encodeURIComponent(document.getElementById("building").innerText || "");
+  const floor = encodeURIComponent(document.getElementById("floor").innerText || "");
+  const room = encodeURIComponent(document.getElementById("room").innerText || "");
 
-  if (!issue) {
-    alert("Please describe the issue (required)");
-    return;
-  }
+  const url =
+    "https://survey123.arcgis.com/share/1a7b95d8ccc94b6a8a1f3877ca86d5aa"
+    + "?field:building=" + building
+    + "&field:_floor=" + floor
+    + "&field:room=" + room;
 
-  try {
+  window.open(url, "_blank");
 
-    const response = await fetch(
-      "https://defaultcc95de1b97f54f93b4bafe68b852cf.91.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/4a405aa2d10047d3a6fc3a32af77d914/triggers/manual/paths/invoke?api-version=1",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          "issue": issue,
-          "category": category,
-          "building": document.getElementById("building").innerText,
-          "floor": document.getElementById("floor").innerText,
-          "room": document.getElementById("room").innerText
-        })
-      }
-    );
-
-    // 🔍 IMPORTANT DEBUG
-    const result = await response.text();
-    console.log("FLOW RAW RESPONSE:", result);
-
-    if (!response.ok) {
-      alert("❌ Flow failed");
-      return;
-    }
-
-    alert("✅ Submitted");
-
-  } catch (e) {
-    console.error("FETCH ERROR:", e);
-    alert("❌ Submission failed");
-  }
-
-}</script>
+}
+</script>
 </body>
 </html>
