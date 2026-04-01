@@ -282,51 +282,35 @@ async function submitIssue() {
 
   try {
 
-    // 1️⃣ Get request digest
-    const digestResponse = await fetch(
-      "https://unioxfordnexus.sharepoint.com/sites/ITServices-ArcGISSupportTeam/_api/contextinfo",
-      {
-        method: "POST",
-        headers: {
-          "Accept": "application/json;odata=verbose"
-        }
-      }
-    );
+    const payload = {
+      issue: issue,
+      category: category,
+      building: document.getElementById("building").innerText,
+      floor: document.getElementById("floor").innerText,
+      room: document.getElementById("room").innerText
+    };
 
-    const digestData = await digestResponse.json();
-    const requestDigest = digestData.d.GetContextWebInformation.FormDigestValue;
-
-    // 2️⃣ POST item
     const response = await fetch(
-      "https://unioxfordnexus.sharepoint.com/sites/ITServices-ArcGISSupportTeam/_api/web/lists/getbytitle('FM_Requests')/items",
+      "https://defaultcc95de1b97f54f93b4bafe68b852cf.91.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/4a405aa2d10047d3a6fc3a32af77d914/triggers/manual/paths/invoke?api-version=1",
       {
         method: "POST",
         headers: {
-          "Accept": "application/json;odata=verbose",
-          "Content-Type": "application/json;odata=verbose",
-          "X-RequestDigest": requestDigest
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          __metadata: { type: "SP.Data.FM_x005f_RequestsListItem" }, // ✅ FIXED
-          Title: issue,
-          Category: category,
-          Building: document.getElementById("building").innerText,
-          Floor: document.getElementById("floor").innerText,
-          Room: document.getElementById("room").innerText
-        })
+        body: JSON.stringify(payload)
       }
     );
-
-    const text = await response.text();
-    console.log(text);
 
     if (!response.ok) {
-  console.error("FULL ERROR:", text);
-  alert(text);
-  throw new Error(text);
-}
+      throw new Error("Flow call failed");
+    }
 
+    alert("✅ Submitted successfully");
 
+  } catch (error) {
+    console.error(error);
+    alert("❌ Submission failed");
+  }
 
 }
 </script>
